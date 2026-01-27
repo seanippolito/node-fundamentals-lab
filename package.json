@@ -1,0 +1,12 @@
+{
+  "name": "node-fundamentals-lab",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "dev:api": "pnpm --filter @lab/api dev",
+    "dev:web": "pnpm --filter @lab/web dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @lab/api start"
+  }
+}
