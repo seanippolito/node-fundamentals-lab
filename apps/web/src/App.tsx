@@ -44,7 +44,10 @@ export default function App() {
     const [history, setHistory] = useState<MetricsSample[]>([]);
     const [leakStatus, setLeakStatus] = useState<{ running: boolean; retainedGroups: number } | null>(null);
     const [statusMsg, setStatusMsg] = useState<string | null>(null);
-    const [cpuStatus, setCpuStatus] = useState<{ inFlight: number; inFlightBlock: number; inFlightWorker: number } | null>(null);
+    const [poolStatus, setPoolStatus] = useState<{
+        size: number; maxQueue: number; queued: number; running: number; completed: number; rejected: number;
+    } | null>(null);
+    const [showInterviewNotes, setShowInterviewNotes] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -53,7 +56,7 @@ export default function App() {
     const rssPoints = history.map(s => ({ t: s.t, v: s.memory.rss }));
     const heapPoints = history.map(s => ({ t: s.t, v: s.memory.heapUsed }));
     const extPoints = history.map(s => ({ t: s.t, v: s.memory.external }));
-    const evP99Points = history.map(s => ({ t: s.t, v: s.ev.p99 }));
+    // const evP99Points = history.map(s => ({ t: s.t, v: s.ev.p99 }));
     const evMaxPoints = history.map(s => ({ t: s.t, v: s.evMax.max }));
 
     async function refreshFiles() {
@@ -76,13 +79,9 @@ export default function App() {
         window.setTimeout(() => setStatusMsg(null), ms);
     }
 
-    async function pollCpuStatus() {
-        const s = await apiJson<{ ok: boolean; inFlight: number; inFlightBlock: number; inFlightWorker: number }>("/cpu/status");
-        setCpuStatus({
-            inFlight: s.inFlight,
-            inFlightBlock: s.inFlightBlock,
-            inFlightWorker: s.inFlightWorker
-        });
+    async function pollPoolStatus() {
+        const r = await apiJson<{ ok: boolean; pool: any }>("/cpu/pool/status");
+        setPoolStatus(r.pool);
     }
 
     async function retentionSpike() {
@@ -120,14 +119,18 @@ export default function App() {
         pollLeakStatus().catch(console.error);
         const tl = window.setInterval(() => pollLeakStatus().catch(console.error), 1000);
 
-        pollCpuStatus().catch(console.error);
-        const tc = window.setInterval(() => pollCpuStatus().catch(console.error), 500);
+        // pollCpuStatus().catch(console.error);
+        // const tc = window.setInterval(() => pollCpuStatus().catch(console.error), 500);
+
+        pollPoolStatus().catch(console.error);
+        const tp = window.setInterval(() => pollPoolStatus().catch(console.error), 500);
 
         return () => {
             window.clearInterval(t);
             window.clearInterval(th);
             window.clearInterval(tl);
-            window.clearInterval(tc);
+            // window.clearInterval(tc);
+            window.clearInterval(tp);
         };
     }, []);
 
@@ -391,7 +394,78 @@ export default function App() {
             </div>
 
             <div className="card" style={{marginTop: 16}}>
-                <h2>Event Loop Delay (p99)</h2>
+                <h2>CPU & Event Loop</h2>
+                <button
+                    style={{marginBottom: 12}}
+                    onClick={() => setShowInterviewNotes(v => !v)}
+                >
+                    {showInterviewNotes ? "Hide" : "Show"} interview notes
+                </button>
+
+                {showInterviewNotes && (
+                    <div className="card" style={{background: "#101026"}}>
+                        <b>Senior interview notes</b>
+                        <ul className="small">
+                            <li>
+                                Node executes JavaScript on a single event-loop thread. Any CPU-heavy
+                                JavaScript blocks the entire process.
+                            </li>
+                            <li>
+                                Asynchronous IO does not mean parallel execution. Only worker threads
+                                provide true parallelism for JavaScript.
+                            </li>
+                            <li>
+                                CPU-bound workloads must be isolated from the event loop to preserve
+                                latency and system responsiveness.
+                            </li>
+                            <li>
+                                Worker threads should be pooled to avoid oversubscription and uncontrolled
+                                CPU contention.
+                            </li>
+                            <li>
+                                Backpressure applies to CPU workloads just like network IO — excess work
+                                should be queued or rejected, not accepted blindly.
+                            </li>
+                        </ul>
+
+                        <div className="card" style={{background: "#0d0d1a"}}>
+                            <b>Execution model</b>
+                            <pre className="small" style={{marginTop: 8}}>
+                                {`
+                                                ┌─────────────────────────┐
+                                                │      Event Loop         │
+                                                │   (single JS thread)    │
+                                                └───────────┬─────────────┘
+                                                            │
+                                        ┌───────────────────┴───────────────────┐
+                                        │                                       │
+                                 CPU-heavy JS                             Async IO
+                                 (blocks loop)                           (non-blocking)
+                                        │                                       │
+                                        ▼                                       ▼
+                                  ❌ latency spikes                     OS / libuv
+                                  ❌ stalled requests                   callbacks scheduled
+                                  ❌ metrics freeze                     event loop stays free
+                                
+                                
+                                 Worker Threads
+                                 ─────────────────
+                                 Separate JS runtimes
+                                 Separate heaps
+                                 Separate event loops
+                                 Used for CPU-bound work
+                                `}
+                            </pre>
+                        </div>
+                    </div>
+
+
+                )}
+
+                <div className="small" style={{marginBottom: 12}}>
+                    These demos illustrate how CPU-heavy JavaScript affects the Node.js event loop,
+                    and how worker threads and pooling mitigate those effects.
+                </div>
                 <Graph
                     title="Event loop delay p99 (ms)"
                     series={[{name: "p99", points: evMaxPoints}]}
@@ -399,42 +473,96 @@ export default function App() {
                 />
 
                 <div className="small" style={{marginTop: 8}}>
-                    CPU in-flight:{" "}
-                    <b>{cpuStatus ? cpuStatus.inFlight : "…"}</b>{" "}
-                    (block: {cpuStatus ? cpuStatus.inFlightBlock : "…"},
-                    worker: {cpuStatus ? cpuStatus.inFlightWorker : "…"})
+                    Worker pool:{" "}
+                    <b>{poolStatus ? `${poolStatus.running}/${poolStatus.size} running` : "…"}</b>
+                    {" • "}
+                    queued: <b>{poolStatus ? poolStatus.queued : "…"}</b>
+                    {" • "}
+                    completed: {poolStatus ? poolStatus.completed : "…"}
+                    {" • "}
+                    rejected: {poolStatus ? poolStatus.rejected : "…"}
                 </div>
 
-                <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12}}>
-                    <button
-                        onClick={async () => {
-                            try {
-                                flash("CPU block (800ms) started…");
-                                const r = await cpuBlock(800);
-                                flash(`CPU block done (actual ${r.actualMs}ms)`);
-                            } catch (e) {
-                                flash(`CPU block failed: ${String(e)}`, 4000);
-                            }
-                        }}
-                        disabled={busy}
-                    >
-                        CPU block 800ms ❌
-                    </button>
+                <div className="card">
+                    <h3>⚠️ Worker Pool Saturation</h3>
+
+                    <div className="small">
+                        Enqueues many CPU jobs at once to demonstrate queueing, throughput limits,
+                        and CPU backpressure. When the queue is full, jobs are rejected.
+                    </div>
 
                     <button
                         onClick={async () => {
-                            try {
-                                flash("CPU worker (800ms) started…");
-                                const r = await cpuWorker(800);
-                                flash(`CPU worker done (actual ${r.actualMs}ms)`);
-                            } catch (e) {
-                                flash(`CPU worker failed: ${String(e)}`, 4000);
-                            }
+                            flash("Enqueuing burst of CPU jobs...");
+                            await apiJson("/cpu/pool/enqueue?ms=800&n=10", {method: "POST"});
+                            flash("Burst submitted.");
                         }}
-                        disabled={busy}
                     >
-                        CPU worker 800ms ✅
+                        Enqueue 10 × 800ms
                     </button>
+                    <div className="small" style={{marginTop: 6, opacity: 0.8}}>
+                        Expected:
+                        <ul>
+                            <li>running ≤ pool size</li>
+                            <li>queued increases</li>
+                            <li>rejected increases when saturated</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div className="card">
+                    <h3>❌ CPU Block (Main Thread)</h3>
+
+                    <div className="small">
+                        Executes CPU-heavy JavaScript directly on the event loop thread.
+                        While this runs, <b>all requests stall</b> and event loop delay spikes.
+                    </div>
+
+                    <button
+                        onClick={async () => {
+                            flash("CPU block started (main thread)...");
+                            await cpuBlock(800);
+                            flash("CPU block finished.");
+                        }}
+                    >
+                        CPU block 800ms
+                    </button>
+                    <div className="small" style={{marginTop: 6, opacity: 0.8}}>
+                        Expected:
+                        <ul>
+                            <li>Event loop delay spikes</li>
+                            <li>Other requests temporarily stall</li>
+                            <li>UI polling pauses</li>
+                            <li>metrics temporarily stop</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div className="card">
+                    <h3>✅ CPU Worker (Pooled)</h3>
+
+                    <div className="small">
+                        Offloads CPU work to a worker thread from a fixed-size pool.
+                        The event loop remains responsive while work executes in parallel.
+                    </div>
+
+                    <button
+                        onClick={async () => {
+                            flash("CPU worker job submitted...");
+                            await cpuWorker(800);
+                            flash("CPU worker job completed.");
+                        }}
+                    >
+                        CPU worker 800ms
+                    </button>
+                    <div className="small" style={{marginTop: 6, opacity: 0.8}}>
+                        Expected:
+                        <ul>
+                            <li>event loop delay mostly flat</li>
+                            <li>memory stable</li>
+                            <li>UI responsive</li>
+                        </ul>
+                    </div>
                 </div>
                 {statusMsg && (
                     <div
@@ -448,10 +576,6 @@ export default function App() {
                         <b>Status:</b> {statusMsg}
                     </div>
                 )}
-                <div className="small" style={{marginTop: 10}}>
-                    Expected: CPU block spikes event-loop p99 and makes all requests slower. Worker keeps event-loop
-                    delay much flatter.
-                </div>
             </div>
         </div>
     );

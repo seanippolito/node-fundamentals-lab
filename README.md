@@ -409,5 +409,72 @@ Node is **predictable** once you understand:
 This project exists to make those boundaries visible.
 
 ```
+---
+
+# ✅ 3️⃣ Portfolio-ready project description
+
+This is the part to reuse in:
+
+* GitHub repo description
+* personal portfolio
+* “Projects” section of resume
+* interview walkthroughs
+
+You can literally paste this anywhere.
+
+---
+
+## 📌 Portfolio Description
+
+### **Node Fundamentals Lab — Backend Systems & Performance Exploration**
+
+A hands-on backend engineering lab designed to deeply understand how Node.js behaves under real-world system pressure.
+
+This project visualizes and demonstrates:
+
+* JavaScript memory vs process memory (heap vs RSS)
+* garbage collection behavior
+* memory retention vs memory leaks
+* buffered vs streaming IO
+* backpressure mechanisms
+* event loop blocking
+* worker threads and CPU isolation
+* worker pool design and saturation handling
+
+Rather than focusing on APIs alone, the lab emphasizes **observable runtime behavior** — allowing performance characteristics to be seen, measured, and reasoned about in real time.
+
+The application includes a lightweight React frontend for live graphs and controls, and an Express + TypeScript backend instrumented with:
+
+* memory metrics
+* event loop delay monitoring
+* streaming and buffered file operations
+* CPU-bound workloads executed both on the event loop and in worker threads
+* a fixed-size worker pool with queueing and rejection
+
+The project is intentionally designed as an interview-preparation and systems-thinking tool, helping bridge the gap between theoretical knowledge and production behavior.
+
+---
+
+### Key engineering concepts demonstrated
+
+* Single-threaded event loop constraints
+* Native vs JavaScript memory boundaries
+* Effects of large buffers on CPU and RSS
+* Backpressure for IO and CPU workloads
+* Worker thread pooling and saturation control
+* Tail latency and system resilience
+
+---
+
+### Why this project matters
+
+Many Node.js production issues are not caused by incorrect syntax or missing awaits — but by misunderstandings of:
+
+* memory ownership
+* event loop scheduling
+* CPU isolation
+* workload backpressure
+
+This lab exists to make those boundaries visible.
 
 ---
