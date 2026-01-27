@@ -1,4 +1,4 @@
-import { parentPort, workerData } from "node:worker_threads";
+import { parentPort } from "node:worker_threads";
 
 function busyLoop(ms: number) {
     const start = Date.now();
@@ -7,10 +7,15 @@ function busyLoop(ms: number) {
     }
 }
 
-const ms: number = workerData?.ms ?? 300;
+parentPort?.on("message", (msg: any) => {
+    const id = msg?.id;
+    const ms = msg?.ms;
 
-const t0 = Date.now();
-busyLoop(ms);
-const t1 = Date.now();
+    if (typeof id !== "number" || typeof ms !== "number") return;
 
-parentPort?.postMessage({ requestedMs: ms, actualMs: t1 - t0 });
+    const t0 = Date.now();
+    busyLoop(ms);
+    const t1 = Date.now();
+
+    parentPort?.postMessage({ id, requestedMs: ms, actualMs: t1 - t0 });
+});
