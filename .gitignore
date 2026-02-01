@@ -23,4 +23,4 @@ apps/api/lab.sqlite
 apps/api/lab.sqlite-shm
 apps/api/lab.sqlite-wal
 
-.env
+apps/api/.env
