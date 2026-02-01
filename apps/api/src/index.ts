@@ -8,8 +8,11 @@ import { uploadsRouter } from "./routes/uploads.js";
 import { startMetricsRecorder, getMetricsHistory, getMetricsSnapshot } from "./metrics.js";
 import { labsRouter } from "./routes/labs.js";
 import { cpuRouter } from "./routes/cpu.js";
+import http from "node:http";
+import { attachWebSocketServer } from "./realtime/wsHub.js";
+import { realtimeRouter } from "./routes/realtime.js";
 
-const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
+const log = pino({ level: process.env.LOG_LEVEL ?? "silent" });
 
 const app = express();
 
@@ -60,6 +63,7 @@ app.use("/labs", labsRouter);
 app.use("/files", filesRouter);
 app.use("/upload", uploadsRouter);
 app.use("/cpu", cpuRouter);
+app.use("/realtime", realtimeRouter);
 
 // Error handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -68,7 +72,13 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
     res.status(500).json({ error: msg, details });
 });
 
-const port = Number(process.env.PORT ?? 4000);
-app.listen(port, () => {
-    log.info({ port }, "API listening");
+const server = http.createServer(app);
+
+attachWebSocketServer(server);
+
+const port = Number(process.env.PORT || 4000);
+server.listen(port, () => {
+    console.log(`[api] listening on http://localhost:${port}`);
+    console.log(`[api] SSE: http://localhost:${port}/realtime/sse`);
+    console.log(`[api] WS:  ws://localhost:${port}/realtime/ws`);
 });

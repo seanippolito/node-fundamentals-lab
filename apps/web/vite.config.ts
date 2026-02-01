@@ -5,12 +5,13 @@ export default defineConfig({
     plugins: [react()],
     server: {
         proxy: {
-            "/health": "http://localhost:4000",
-            "/metrics": "http://localhost:4000",
-            "/files": "http://localhost:4000",
-            "/upload": "http://localhost:4000",
-            "/labs": "http://localhost:4000",
-            "/cpu": "http://localhost:4000"
+            "/health": { target: "http://localhost:4000", changeOrigin: true },
+            "/files": { target: "http://localhost:4000", changeOrigin: true },
+            "/upload": { target: "http://localhost:4000", changeOrigin: true },
+            "/metrics": { target: "http://localhost:4000", changeOrigin: true },
+            "/labs": { target: "http://localhost:4000", changeOrigin: true },
+            "/cpu": { target: "http://localhost:4000", changeOrigin: true },
+            "/realtime": { target: "http://localhost:4000", changeOrigin: true, ws: true }
         }
     }
 });
