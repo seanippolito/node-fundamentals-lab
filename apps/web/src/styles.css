@@ -55,3 +55,41 @@ input, select {
     opacity: 0.8;
     font-size: 12px;
 }
+
+.tabs {
+    width: 100%;
+}
+
+.tabs-header {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #24243a;
+    padding-bottom: 8px;
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    color: #9a9ab8;
+    padding: 10px 20px;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+    background: #1a1a2e;
+    color: #eaeaf2;
+}
+
+.tab-button.active {
+    background: #2a2a48;
+    color: #eaeaf2;
+    border: 1px solid #3a3a64;
+    border-bottom: none;
+}
+
+.tab-content {
+    padding-top: 8px;
+}

@@ -205,7 +205,6 @@ export default function CpuMemoryLab() {
 
     return (
         <div className="container">
-            <h1>Node Fundamentals Lab</h1>
             <p className="small">
                 SQLite-backed chunked BLOB storage. Use this to compare buffering vs streaming, event loop impact, and
                 memory behavior.
