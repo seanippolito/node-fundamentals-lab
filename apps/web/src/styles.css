@@ -93,3 +93,76 @@ input, select {
 .tab-content {
     padding-top: 8px;
 }
+
+/* ---- Interview Notes (collapsible) ---- */
+.notes {
+    margin-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding-top: 10px;
+}
+
+.notes summary {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    list-style: none; /* remove default marker in some browsers */
+}
+
+.notes summary::-webkit-details-marker {
+    display: none; /* remove default marker in Chrome */
+}
+
+.notes summary::before {
+    content: "▸";
+    display: inline-block;
+    transition: transform 120ms ease;
+    opacity: 0.85;
+}
+
+.notes[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.notes__body {
+    margin-top: 10px;
+    opacity: 0.92;
+    line-height: 1.45;
+    font-size: 0.95rem;
+}
+
+.notes__section {
+    margin-top: 10px;
+}
+
+.notes__section > b {
+    display: inline-block;
+    margin-bottom: 6px;
+}
+
+.notes__list {
+    margin: 6px 0 0;
+    padding-left: 18px;
+}
+
+.notes__list li {
+    margin: 4px 0;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    font-size: 0.85rem;
+    opacity: 0.9;
+}
+
+.badge--muted {
+    opacity: 0.6;
+}
+

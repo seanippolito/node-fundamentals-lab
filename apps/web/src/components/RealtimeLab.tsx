@@ -12,6 +12,33 @@ function nowIso() {
     return new Date().toISOString().slice(11, 19);
 }
 
+function InterviewNotes({
+                            title,
+                            children,
+                            defaultOpen = false
+                        }: {
+    title: string;
+    children: React.ReactNode;
+    defaultOpen?: boolean;
+}) {
+    return (
+        <details className="notes" open={defaultOpen}>
+            <summary>{title}</summary>
+            <div className="notes__body">{children}</div>
+        </details>
+    );
+}
+
+function NotesList({ items }: { items: string[] }) {
+    return (
+        <ul className="notes__list">
+            {items.map((t, i) => (
+                <li key={i}>{t}</li>
+            ))}
+        </ul>
+    );
+}
+
 export function RealtimeLab() {
     // ---- SSE
     const [sseConnected, setSseConnected] = useState(false);
@@ -162,6 +189,12 @@ export function RealtimeLab() {
                 body
             });
 
+            if (r.status === 429) {
+                const retryAfter = Number(r.headers.get("Retry-After") || "1");
+                setWebhookResult(`429 Rate limited. Retry after ~${retryAfter}s`);
+                return;
+            }
+
             const txt = await r.text();
             setWebhookResult(`${r.status} ${txt}`);
         } catch (e: any) {
@@ -178,6 +211,7 @@ export function RealtimeLab() {
     const [pollRps, setPollRps] = useState<number>(0);
     const [pollCatchUp, setPollCatchUp] = useState(false);
     const [pollLatencySeries, setPollLatencySeries] = useState<number[]>([]);
+    const [pollStatus, setPollStatus] = useState<string>("");
 
     const pollAbortRef = useRef<AbortController | null>(null);
     const pollDurationsRef = useRef<number[]>([]);
@@ -228,6 +262,14 @@ export function RealtimeLab() {
                         signal: ac.signal
                     });
 
+                    if (r.status === 429) {
+                        const retryAfter = Number(r.headers.get("Retry-After") || "1");
+                        // show status somewhere (add state below)
+                        setPollStatus(`Rate limited (429). Retry after ~${retryAfter}s`);
+                        await new Promise((r) => setTimeout(r, retryAfter * 1000));
+                        continue;
+                    }
+
                     const t1 = performance.now();
                     const dur = Math.max(0, t1 - t0);
 
@@ -266,7 +308,7 @@ export function RealtimeLab() {
 
                     // Short poll: sleep to avoid hammering
                     if (pollMode === "short") {
-                        await new Promise((r) => setTimeout(r, 1000));
+                        await new Promise((r) => setTimeout(r, 500));
                     }
 
                     // Long poll should usually wait. If it returns instantly w/ no events (misconfig / edge),
@@ -274,6 +316,7 @@ export function RealtimeLab() {
                     if (pollMode === "long" && events.length === 0 && dur < 50) {
                         await new Promise((r) => setTimeout(r, 100));
                     }
+                    setPollStatus("");
                 } catch (e: any) {
                     if (ac.signal.aborted) break;
                     // backoff on errors
@@ -364,6 +407,46 @@ export function RealtimeLab() {
                     Expected: SSE auto-reconnects on disconnect. (True Last-Event-ID resume from browsers requires a
                     fetch-based SSE client; we’ll add later if needed.)
                 </div>
+                <InterviewNotes title="Interview notes — SSE">
+                    <div>
+                        SSE provides a <b>one-way server → client stream</b> over HTTP. It’s ideal for push updates where the
+                        client does not need to send frequent messages. This demo includes reconnect behavior and cursor replay
+                        via <code>Last-Event-ID</code>.
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Strengths</b>
+                        <NotesList
+                            items={[
+                                "Low overhead and simple operationally",
+                                "Built-in reconnect semantics",
+                                "Great for dashboards and notifications",
+                                "Often easier to scale than WebSockets"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Limitations</b>
+                        <NotesList
+                            items={[
+                                "One-way only (server → client)",
+                                "Some proxies buffer or terminate long responses",
+                                "Not ideal for high-frequency bidirectional traffic"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Metrics that matter</b>
+                        <NotesList items={["Connection count", "Event delivery latency", "Reconnect frequency"]} />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>When I’d use this</b>
+                        <NotesList items={["Real-time dashboards", "Notification feeds", "Monitoring/observability streams"]} />
+                    </div>
+                </InterviewNotes>
             </div>
 
             <div className="card">
@@ -392,15 +475,68 @@ export function RealtimeLab() {
                     Expected: WS supports two-way messaging + rooms. Server uses ping/pong keepalive and drops messages
                     if a client buffers too much (backpressure safety).
                 </div>
+                <InterviewNotes title="Interview notes — WebSockets">
+                    <div>
+                        WebSockets provide <b>full-duplex, low-latency communication</b> over a persistent connection. This demo
+                        shows connection lifecycle, fan-out, and integration with a shared event stream.
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Strengths</b>
+                        <NotesList
+                            items={[
+                                "Bidirectional communication",
+                                "Very low latency",
+                                "Best fit for interactive systems"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Tradeoffs</b>
+                        <NotesList
+                            items={[
+                                "Stateful connections (more complex than HTTP)",
+                                "Requires heartbeats/cleanup",
+                                "Scaling horizontally requires stickiness or pub/sub fan-out",
+                                "Backpressure must be considered explicitly"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>What breaks at scale</b>
+                        <NotesList
+                            items={[
+                                "Sticky sessions or shared pub/sub fan-out",
+                                "Connection limits per node",
+                                "Slow consumers can impact throughput if not handled"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>When I’d use this</b>
+                        <NotesList items={["Chat", "Collaborative editing", "Live interactive apps"]} />
+                    </div>
+                </InterviewNotes>
             </div>
 
             <div className="card">
                 <h3>Polling (Short + Long)</h3>
+                {pollStatus && (
+                    <div className="small" style={{ marginTop: 8, opacity: 0.9 }}>
+                        <b>Status:</b> {pollStatus}
+                    </div>
+                )}
 
                 <div className="small">
-                    Mode: <b>{pollMode}</b> • status: <b>{polling ? "running" : "stopped"}</b> •
-                    requests: <b>{pollRequests}</b> • cursor:{" "}
-                    <b>{pollAfterSeq ?? "—"}</b>
+                    <span className="badge">
+                      Mode: {pollMode}
+                    </span>
+                    <span className="badge"> status: {polling ? "running" : "stopped"} </span>
+                    <span className="badge"> requests: {pollRequests}</span>
+                    <span className="badge"> cursor:{" "} {pollAfterSeq ?? "—"}</span>
                 </div>
 
 
@@ -409,15 +545,8 @@ export function RealtimeLab() {
                     <span>Latency: <b>{pollLastMs == null ? "—" : `${pollLastMs.toFixed(0)}ms`}</b></span>
                     <span>Avg(20): <b>{pollAvgMs == null ? "—" : `${pollAvgMs.toFixed(0)}ms`}</b></span>
                     <span>RPS(5s): <b>{pollRps.toFixed(2)}</b></span>
-                    <span
-                        style={{
-                            padding: "2px 8px",
-                            borderRadius: 999,
-                            border: "1px solid currentColor",
-                            opacity: pollCatchUp ? 1 : 0.6
-                        }}
-                    >
-                        Catch-up: <b>{pollCatchUp ? "yes" : "no"}</b>
+                    <span className={`badge ${pollCatchUp ? "" : "badge--muted"}`}>
+                      Catch-up: {pollCatchUp ? "yes" : "no"}
                     </span>
 
                     <span style={{display: "inline-flex", alignItems: "center", gap: 6, opacity: 0.85}}>
@@ -453,6 +582,62 @@ export function RealtimeLab() {
                         </li>
                     </ul>
                 </div>
+
+                <InterviewNotes title="Interview notes — Polling (Short + Long)">
+                    <div>
+                        Polling is the most compatible real-time delivery strategy because it works everywhere HTTP works.
+                        This lab uses <b>cursor-based polling</b> with a <b>monotonically increasing sequence</b> to guarantee
+                        ordering and avoid missed/duplicated events.
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Short polling</b>
+                        <NotesList
+                            items={[
+                                "Client polls on a fixed interval",
+                                "Simple to implement",
+                                "Higher request volume when idle",
+                                "Latency bounded by polling interval"
+                            ]}
+                        />
+                        <b>Long polling</b>
+                        <NotesList
+                            items={[
+                                "Server holds the request open until an event arrives or a timeout occurs",
+                                "Near-real-time without persistent connections",
+                                "Lower request churn than short polling",
+                                "Timeout + reconnect behavior must be handled carefully"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>What to watch</b>
+                        <NotesList items={["RPS (request churn)", "Poll latency (idle vs active)", "Catch-up behavior after reconnects"]} />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Common failure modes</b>
+                        <NotesList
+                            items={[
+                                "Tight polling loops due to stale cursors",
+                                "Thundering herd after reconnect",
+                                "Missing events without cursor semantics"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>When I’d use this</b>
+                        <NotesList
+                            items={[
+                                "Fallback when SSE/WebSockets aren’t available",
+                                "Constrained environments (proxies/firewalls)",
+                                "When reliability matters more than lowest latency"
+                            ]}
+                        />
+                    </div>
+                </InterviewNotes>
             </div>
 
             <div className="card">
@@ -495,12 +680,56 @@ export function RealtimeLab() {
                     Expected: First send inserts into SQLite + publishes <code>webhook.received</code>. Re-sending the
                     same event ID returns OK with <code>duplicate: true</code>.
                 </div>
+                <InterviewNotes title="Interview notes — Webhooks">
+                    <div>
+                        Webhooks deliver events <b>across trust boundaries</b> and must be designed for failure. This demo includes
+                        signature verification over <b>raw bytes</b> and idempotent processing in SQLite.
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Key guarantees</b>
+                        <NotesList
+                            items={[
+                                "At-least-once delivery",
+                                "No ordering guarantee",
+                                "Duplicate delivery is expected"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Critical requirements</b>
+                        <NotesList
+                            items={[
+                                "HMAC signature verification using raw request body",
+                                "Idempotency key (unique event id) to dedupe",
+                                "Retry-safe handler (no side effects on duplicates)"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Common pitfalls</b>
+                        <NotesList
+                            items={[
+                                "Parsing JSON before signature verification (consumes stream / changes bytes)",
+                                "Assuming single delivery",
+                                "Treating duplicates as errors instead of normal"
+                            ]}
+                        />
+                    </div>
+
+                    <div className="notes__section">
+                        <b>When I’d use this</b>
+                        <NotesList items={["Third-party integrations", "Event-driven workflows", "Cross-service notifications"]} />
+                    </div>
+                </InterviewNotes>
             </div>
 
             <div className="card">
                 <h3>Event Feed</h3>
                 <div className="small" style={{opacity: 0.9}}>
-                    Latest 200 events (from SSE + WS broadcast + webhook events).
+                    Latest 200 events (from SSE + WS broadcast + polling + webhook events).
                 </div>
                 <div style={{marginTop: 10, maxHeight: 360, overflow: "auto"}}>
                     {feed.map((e) => (
@@ -510,11 +739,29 @@ export function RealtimeLab() {
                                 style={{opacity: 0.7}}>seq={e.seq}</span>
                             </div>
                             <pre className="small" style={{margin: 0, opacity: 0.9, whiteSpace: "pre-wrap"}}>
-                {JSON.stringify(e.data, null, 2)}
-              </pre>
+                                {JSON.stringify(e.data, null, 2)}
+                            </pre>
                         </div>
                     ))}
                 </div>
+                <InterviewNotes title="Interview notes — Shared stream + monotonic cursor">
+                    <div>
+                        All delivery mechanisms in this lab share a single ordered stream using a <b>monotonic sequence</b> cursor.
+                        This enables deterministic ordering, cursor-based replay, and transport-agnostic dedupe.
+                    </div>
+
+                    <div className="notes__section">
+                        <b>Why sequence beats timestamps/UUIDs</b>
+                        <NotesList
+                            items={[
+                                "No clock skew",
+                                "Simple numeric comparison",
+                                "Easy gap detection (future descrambler)",
+                                "Efficient replay semantics"
+                            ]}
+                        />
+                    </div>
+                </InterviewNotes>
             </div>
         </div>
     );

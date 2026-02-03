@@ -3,13 +3,29 @@ import crypto from "node:crypto";
 import { eventBus } from "../realtime/eventBus.js";
 import { sseHandler } from "../realtime/sse.js";
 import { recordWebhookOnce } from "../realtime/webhookDb.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 
 export const realtimeRouter = Router();
+
+// Polling can be extremely chatty; protect the server.
+const pollLimiter = rateLimit({
+    name: "poll",
+    capacity: 2,       // burst
+    refillPerSec: 1    // sustained
+});
+
+// Webhooks should be protected too (esp. retries/abuse).
+const webhookLimiter = rateLimit({
+    name: "webhook",
+    capacity: 2,
+    refillPerSec: 0.5
+});
+
 
 // SSE stream
 realtimeRouter.get("/sse", sseHandler);
 
-realtimeRouter.get("/poll", async (req, res) => {
+realtimeRouter.get("/poll", pollLimiter, async (req, res) => {
     const afterSeqRaw = typeof req.query.afterSeq === "string" ? req.query.afterSeq : undefined;
     const afterSeqParsed = afterSeqRaw != null ? Number(afterSeqRaw) : NaN;
     const afterSeq = Number.isFinite(afterSeqParsed) ? afterSeqParsed : 0; // <-- default to 0
@@ -67,7 +83,7 @@ realtimeRouter.post("/publish", (req, res) => {
     res.json({ ok: true, event: evt });
 });
 
-realtimeRouter.post("/webhook", async (req, res) => {
+realtimeRouter.post("/webhook", webhookLimiter, async (req, res) => {
     const secret = process.env.WEBHOOK_SECRET || "dev_secret_change_me";
     const signature = req.header("x-signature") || "";
     const bodyBuf: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from("");
