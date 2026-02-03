@@ -77,7 +77,7 @@ export function attachWebSocketServer(server: any) {
                 if (typeof text !== "string" || text.length > 2000) return;
 
                 const evt = eventBus.publish("ws.message", { clientId: id, room, text }, { room });
-                broadcast(room, { type: "msg", eventId: evt.id, room, from: id, text, ts: evt.ts });
+                broadcast(room, { type: "msg", seq: evt.seq, room, from: id, text, ts: evt.ts });
                 return;
             }
         });

@@ -11,6 +11,7 @@ import { cpuRouter } from "./routes/cpu.js";
 import http from "node:http";
 import { attachWebSocketServer } from "./realtime/wsHub.js";
 import { realtimeRouter } from "./routes/realtime.js";
+import "dotenv/config";
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "silent" });
 
@@ -41,7 +42,8 @@ app.use(cors());
 app.use(compression());
 
 // Keep JSON small so upload endpoints force you to think about streaming
-app.use(express.json({ limit: "256kb" }));
+app.use("/realtime/webhook", express.raw({ type: "application/json", limit: "2mb" }));
+app.use(express.json({ limit: "2mb" }));
 
 // start recorder near startup (after app creation is fine)
 startMetricsRecorder(1000);

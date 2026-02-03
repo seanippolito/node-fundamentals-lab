@@ -3,12 +3,62 @@ import crypto from "node:crypto";
 import { eventBus } from "../realtime/eventBus.js";
 import { sseHandler } from "../realtime/sse.js";
 import { recordWebhookOnce } from "../realtime/webhookDb.js";
-import express from "express";
 
 export const realtimeRouter = Router();
 
 // SSE stream
 realtimeRouter.get("/sse", sseHandler);
+
+realtimeRouter.get("/poll", async (req, res) => {
+    const afterSeqRaw = typeof req.query.afterSeq === "string" ? req.query.afterSeq : undefined;
+    const afterSeqParsed = afterSeqRaw != null ? Number(afterSeqRaw) : NaN;
+    const afterSeq = Number.isFinite(afterSeqParsed) ? afterSeqParsed : 0; // <-- default to 0
+
+
+    const timeoutMsRaw = typeof req.query.timeoutMs === "string" ? req.query.timeoutMs : "0";
+    const timeoutMs = Math.max(0, Math.min(30_000, Number(timeoutMsRaw) || 0)); // clamp to 30s
+
+    const LIMIT = 500;
+
+    // 1) If events already exist after cursor, return immediately (batch)
+    const immediate = eventBus.replayAfterSeq(afterSeq, LIMIT);
+    if (immediate.length > 0 || timeoutMs === 0) {
+        const cursor = immediate.length ? immediate[immediate.length - 1].seq : afterSeq;
+        return res.json({ ok: true, mode: timeoutMs === 0 ? "short" : "long", events: immediate, cursor });
+    }
+
+    // 2) Long poll: wait until ANY event arrives, then batch return everything since cursor
+    let finished = false;
+
+    const result = await new Promise<{ events: any[]; cursor: number | null }>((resolve) => {
+        const unsub = eventBus.subscribe(() => {
+            if (finished) return;
+            finished = true;
+            unsub();
+
+            const events = eventBus.replayAfterSeq(afterSeq, LIMIT);
+            const cursor = events.length ? events[events.length - 1].seq : afterSeq;
+            resolve({ events, cursor });
+        });
+
+        const t = setTimeout(() => {
+            if (finished) return;
+            finished = true;
+            unsub();
+            resolve({ events: [], cursor: afterSeq });
+        }, timeoutMs);
+
+        // clear timeout when resolved early
+        const originalResolve = resolve;
+        resolve = ((payload: any) => {
+            clearTimeout(t);
+            originalResolve(payload);
+        }) as any;
+    });
+
+    return res.json({ ok: true, mode: "long", events: result.events, cursor: result.cursor });
+});
+
 
 // Demo publish endpoint (useful for testing quickly)
 realtimeRouter.post("/publish", (req, res) => {
@@ -17,23 +67,16 @@ realtimeRouter.post("/publish", (req, res) => {
     res.json({ ok: true, event: evt });
 });
 
-const rawJson = express.raw({ type: "application/json", limit: "2mb" });
-
-realtimeRouter.post("/webhook", rawJson, async (req, res) => {
-    console.log("[webhook] secret length:");
-
-
-
+realtimeRouter.post("/webhook", async (req, res) => {
     const secret = process.env.WEBHOOK_SECRET || "dev_secret_change_me";
     const signature = req.header("x-signature") || "";
     const bodyBuf: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from("");
-    console.log("[webhook] secret length:", secret.length);
 
     const expected = crypto
         .createHmac("sha256", secret)
         .update(bodyBuf)
         .digest("hex");
-    console.log("[webhook] expected:", expected, "got:", signature, "bodyLen:", bodyBuf.length);
+
     const sigOk =
         signature.length === expected.length &&
         crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));

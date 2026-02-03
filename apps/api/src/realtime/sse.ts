@@ -3,11 +3,11 @@ import { eventBus, RtEvent } from "./eventBus.js";
 
 function writeSse(res: Response, evt: RtEvent) {
     // SSE format:
-    // id: <id>
+    // id: <seq>
     // event: <type>
     // data: <json>
     // \n
-    res.write(`id: ${evt.id}\n`);
+    res.write(`id: ${evt.seq}\n`);              // <-- seq cursor
     res.write(`event: ${evt.type}\n`);
     res.write(`data: ${JSON.stringify({ ...evt, room: undefined })}\n\n`);
 }
@@ -28,8 +28,10 @@ export function sseHandler(req: Request, res: Response) {
     res.write(`: connected ${new Date().toISOString()}\n\n`);
 
     // Replay if client provided Last-Event-ID header
-    const lastEventId = req.header("Last-Event-ID") ?? undefined;
-    const replay = eventBus.replayAfter(lastEventId, 200);
+    const lastId = req.header("Last-Event-ID") ?? undefined;
+    const afterSeq = lastId != null ? Number(lastId) : undefined;
+
+    const replay = eventBus.replayAfterSeq(afterSeq, 200);
     for (const evt of replay) writeSse(res, evt);
 
     const unsubscribe = eventBus.subscribe((evt) => {
