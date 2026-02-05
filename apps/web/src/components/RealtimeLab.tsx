@@ -8,6 +8,18 @@ type FeedEvent = {
     data: any;
 };
 
+type SseConnStatus = {
+    id: string;
+    connectedAt: number;
+    ageMs: number;
+    blocked: boolean;
+    queueLen: number;
+    queuedBytes: number;
+    dropped: number;
+    lastDrainAt: number | null;
+    sentEvents: number;
+};
+
 function nowIso() {
     return new Date().toISOString().slice(11, 19);
 }
@@ -45,6 +57,7 @@ export function RealtimeLab() {
     const [sseReconnects, setSseReconnects] = useState(0);
     const [lastSeq, setLastSeq] = useState<number | null>(null);
     const [feed, setFeed] = useState<FeedEvent[]>([]);
+    const [sseStatus, setSseStatus] = useState<SseConnStatus[]>([]);
     const esRef = useRef<EventSource | null>(null);
     const seenSeqsRef = useRef<Set<number>>(new Set());
 
@@ -64,9 +77,6 @@ export function RealtimeLab() {
     const connectSse = () => {
         if (esRef.current) esRef.current.close();
 
-        // EventSource cannot set headers (so Last-Event-ID header won’t be sent automatically).
-        // For this lab, we rely on server-side replay only when Last-Event-ID header exists.
-        // If you want true resume in browser, we can switch SSE to fetch+ReadableStream later.
         const es = new EventSource("/realtime/sse");
         esRef.current = es;
 
@@ -74,26 +84,69 @@ export function RealtimeLab() {
 
         es.onerror = () => {
             setSseConnected(false);
-            setSseReconnects(n => n + 1);
+            setSseReconnects((n) => n + 1);
         };
 
-        // Listen to all events by using 'message' fallback plus explicit types
+        // IMPORTANT: Never JSON.parse very large SSE frames in the browser.
+        // Parsing + rendering huge payloads makes the browser a slow consumer,
+        // which causes permanent backpressure on the server.
         es.onmessage = (m) => {
             try {
-                const parsed = JSON.parse(m.data);
-                appendFeed({ seq: Number(parsed.seq), type: parsed.type ?? "message", ts: parsed.ts, data: parsed.data });
+                const data = m.data;
+                if (typeof data === "string" && data.length > 20_000) {
+                    const seq = Number((m as any).lastEventId);
+                    if (Number.isFinite(seq) && seq > 0) {
+                        appendFeed({
+                            seq,
+                            type: "message",
+                            ts: Date.now(),
+                            data: { note: "payload omitted (large SSE frame)" }
+                        });
+                    }
+                    return;
+                }
+
+                const parsed = JSON.parse(data);
+                const seq = Number(parsed.seq);
+                if (!Number.isFinite(seq) || seq <= 0) return;
+
+                appendFeed({
+                    seq,
+                    type: parsed.type ?? "message",
+                    ts: parsed.ts ?? Date.now(),
+                    data: parsed.data
+                });
             } catch {}
         };
+
+        // Typed spam event handler: never parse payload
+        es.addEventListener("sse.spam", (m: MessageEvent) => {
+            const seq = Number((m as any).lastEventId);
+            if (!Number.isFinite(seq) || seq <= 0) return;
+
+            appendFeed({
+                seq,
+                type: "sse.spam",
+                ts: Date.now(),
+                data: { note: "payload omitted (large spam)" }
+            });
+        });
 
         const known = ["webhook.received", "ws.connected", "ws.disconnected", "ws.joined", "ws.message", "demo.event"];
         known.forEach((t) => {
             es.addEventListener(t, (m: any) => {
                 try {
                     const parsed = JSON.parse(m.data);
-                    appendFeed({ seq: Number(parsed.seq), type: parsed.type ?? "message", ts: parsed.ts, data: parsed.data });
+                    const seq = Number(parsed.seq);
+                    if (!Number.isFinite(seq) || seq <= 0) return;
+                    appendFeed({ seq, type: parsed.type ?? "message", ts: parsed.ts ?? Date.now(), data: parsed.data });
                 } catch {}
             });
         });
+    };
+
+    const spamSse = async (kb: number, count: number, paceMs = 2) => {
+        await fetch(`/realtime/sse/spam?kb=${kb}&count=${count}&paceMs=${paceMs}`, { method: "POST" });
     };
 
     const disconnectSse = () => {
@@ -371,6 +424,19 @@ export function RealtimeLab() {
     };
 
     useEffect(() => {
+        const t = setInterval(async () => {
+            try {
+                const r = await fetch("/realtime/sse/status");
+                if (!r.ok) return;
+                const json = await r.json();
+                setSseStatus(Array.isArray(json.conns) ? json.conns : []);
+            } catch {}
+        }, 1000);
+
+        return () => clearInterval(t);
+    }, []);
+
+    useEffect(() => {
         // auto-connect SSE for convenience
         connectSse();
         return () => {
@@ -409,8 +475,10 @@ export function RealtimeLab() {
                 </div>
                 <InterviewNotes title="Interview notes — SSE">
                     <div>
-                        SSE provides a <b>one-way server → client stream</b> over HTTP. It’s ideal for push updates where the
-                        client does not need to send frequent messages. This demo includes reconnect behavior and cursor replay
+                        SSE provides a <b>one-way server → client stream</b> over HTTP. It’s ideal for push updates
+                        where the
+                        client does not need to send frequent messages. This demo includes reconnect behavior and cursor
+                        replay
                         via <code>Last-Event-ID</code>.
                     </div>
 
@@ -439,14 +507,73 @@ export function RealtimeLab() {
 
                     <div className="notes__section">
                         <b>Metrics that matter</b>
-                        <NotesList items={["Connection count", "Event delivery latency", "Reconnect frequency"]} />
+                        <NotesList items={["Connection count", "Event delivery latency", "Reconnect frequency"]}/>
                     </div>
 
                     <div className="notes__section">
                         <b>When I’d use this</b>
-                        <NotesList items={["Real-time dashboards", "Notification feeds", "Monitoring/observability streams"]} />
+                        <NotesList
+                            items={["Real-time dashboards", "Notification feeds", "Monitoring/observability streams"]}/>
                     </div>
                 </InterviewNotes>
+            </div>
+
+            <div className="card">
+                <h3>SSE Backpressure</h3>
+
+                <div className="small" style={{opacity: 0.85}}>
+                    This demonstrates server-side backpressure handling using <code>res.write()</code> return value
+                    + <code>drain</code>.
+                    When a client can’t keep up, events are queued (bounded) and flushed when the socket drains.
+                </div>
+
+                <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
+                    <button onClick={() => spamSse(8, 200, 2)}>Spam SSE (200 × 8KB)</button>
+                    <button onClick={() => spamSse(256, 50, 2)}>Spam SSE (50 × 256KB)</button>
+                    <button onClick={() => spamSse(256, 150, 2)}>Spam SSE (150 × 256KB)</button>
+                </div>
+
+                <div className="small" style={{marginTop: 10}}>
+                    <b>Connections:</b> {sseStatus.length}
+                </div>
+
+                <div style={{marginTop: 10, overflowX: "auto"}}>
+                    <table className="table">
+                        <thead>
+                        <tr>
+                            <th>id</th>
+                            <th>age</th>
+                            <th>blocked</th>
+                            <th>queue</th>
+                            <th>queued</th>
+                            <th>dropped</th>
+                            <th>sent</th>
+                            <th>last drain</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {sseStatus.map((c) => (
+                            <tr key={c.id}>
+                                <td style={{fontFamily: "monospace"}}>{c.id.slice(0, 8)}</td>
+                                <td>{Math.round(c.ageMs / 1000)}s</td>
+                                <td>{c.blocked ? "yes" : "no"}</td>
+                                <td>{c.queueLen}</td>
+                                <td>{Math.round(c.queuedBytes / 1024)}KB</td>
+                                <td>{c.dropped}</td>
+                                <td>{c.sentEvents}</td>
+                                <td>{c.lastDrainAt ? new Date(c.lastDrainAt).toLocaleTimeString() : "—"}</td>
+                            </tr>
+                        ))}
+                        {sseStatus.length === 0 && (
+                            <tr>
+                                <td colSpan={8} style={{opacity: 0.7}}>
+                                    No SSE connections. Connect SSE first, then spam events.
+                                </td>
+                            </tr>
+                        )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <div className="card">
@@ -477,7 +604,8 @@ export function RealtimeLab() {
                 </div>
                 <InterviewNotes title="Interview notes — WebSockets">
                     <div>
-                        WebSockets provide <b>full-duplex, low-latency communication</b> over a persistent connection. This demo
+                        WebSockets provide <b>full-duplex, low-latency communication</b> over a persistent connection.
+                        This demo
                         shows connection lifecycle, fan-out, and integration with a shared event stream.
                     </div>
 
@@ -517,7 +645,7 @@ export function RealtimeLab() {
 
                     <div className="notes__section">
                         <b>When I’d use this</b>
-                        <NotesList items={["Chat", "Collaborative editing", "Live interactive apps"]} />
+                        <NotesList items={["Chat", "Collaborative editing", "Live interactive apps"]}/>
                     </div>
                 </InterviewNotes>
             </div>
@@ -525,7 +653,7 @@ export function RealtimeLab() {
             <div className="card">
                 <h3>Polling (Short + Long)</h3>
                 {pollStatus && (
-                    <div className="small" style={{ marginTop: 8, opacity: 0.9 }}>
+                    <div className="small" style={{marginTop: 8, opacity: 0.9}}>
                         <b>Status:</b> {pollStatus}
                     </div>
                 )}
@@ -585,8 +713,10 @@ export function RealtimeLab() {
 
                 <InterviewNotes title="Interview notes — Polling (Short + Long)">
                     <div>
-                        Polling is the most compatible real-time delivery strategy because it works everywhere HTTP works.
-                        This lab uses <b>cursor-based polling</b> with a <b>monotonically increasing sequence</b> to guarantee
+                        Polling is the most compatible real-time delivery strategy because it works everywhere HTTP
+                        works.
+                        This lab uses <b>cursor-based polling</b> with a <b>monotonically increasing sequence</b> to
+                        guarantee
                         ordering and avoid missed/duplicated events.
                     </div>
 
@@ -613,7 +743,8 @@ export function RealtimeLab() {
 
                     <div className="notes__section">
                         <b>What to watch</b>
-                        <NotesList items={["RPS (request churn)", "Poll latency (idle vs active)", "Catch-up behavior after reconnects"]} />
+                        <NotesList
+                            items={["RPS (request churn)", "Poll latency (idle vs active)", "Catch-up behavior after reconnects"]}/>
                     </div>
 
                     <div className="notes__section">
@@ -682,7 +813,8 @@ export function RealtimeLab() {
                 </div>
                 <InterviewNotes title="Interview notes — Webhooks">
                     <div>
-                        Webhooks deliver events <b>across trust boundaries</b> and must be designed for failure. This demo includes
+                        Webhooks deliver events <b>across trust boundaries</b> and must be designed for failure. This
+                        demo includes
                         signature verification over <b>raw bytes</b> and idempotent processing in SQLite.
                     </div>
 
@@ -721,24 +853,25 @@ export function RealtimeLab() {
 
                     <div className="notes__section">
                         <b>When I’d use this</b>
-                        <NotesList items={["Third-party integrations", "Event-driven workflows", "Cross-service notifications"]} />
+                        <NotesList
+                            items={["Third-party integrations", "Event-driven workflows", "Cross-service notifications"]}/>
                     </div>
                 </InterviewNotes>
             </div>
 
-            <div className="card">
+            <div className="card eventFeed">
                 <h3>Event Feed</h3>
                 <div className="small" style={{opacity: 0.9}}>
                     Latest 200 events (from SSE + WS broadcast + polling + webhook events).
                 </div>
-                <div style={{marginTop: 10, maxHeight: 360, overflow: "auto"}}>
+                <div className="eventFeed__list">
                     {feed.map((e) => (
-                        <div key={e.seq} style={{padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.06)"}}>
-                            <div className="small">
+                        <div key={e.seq} className="eventFeed__item">
+                            <div className="eventFeed__meta">
                                 <b>{e.type}</b> • {new Date(e.ts).toLocaleTimeString()} • <span
                                 style={{opacity: 0.7}}>seq={e.seq}</span>
                             </div>
-                            <pre className="small" style={{margin: 0, opacity: 0.9, whiteSpace: "pre-wrap"}}>
+                            <pre className="eventFeed__payload">
                                 {JSON.stringify(e.data, null, 2)}
                             </pre>
                         </div>
@@ -746,7 +879,8 @@ export function RealtimeLab() {
                 </div>
                 <InterviewNotes title="Interview notes — Shared stream + monotonic cursor">
                     <div>
-                        All delivery mechanisms in this lab share a single ordered stream using a <b>monotonic sequence</b> cursor.
+                        All delivery mechanisms in this lab share a single ordered stream using a <b>monotonic
+                        sequence</b> cursor.
                         This enables deterministic ordering, cursor-based replay, and transport-agnostic dedupe.
                     </div>
 

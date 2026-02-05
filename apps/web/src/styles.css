@@ -166,3 +166,58 @@ input, select {
     opacity: 0.6;
 }
 
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 6px 8px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+/* --- Event Feed containment --- */
+.eventFeed {
+    overflow: hidden;          /* card never expands */
+}
+
+.eventFeed__list {
+    overflow: auto;            /* list scrolls if needed */
+    max-height: 380px;         /* adjust to taste */
+}
+
+.eventFeed__item {
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    padding: 8px 10px;
+}
+
+.eventFeed__meta {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    opacity: 0.9;
+}
+
+.eventFeed__payload {
+    margin-top: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.85rem;
+
+    /* critical containment rules */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    /* preserve readability but prevent horizontal stretching */
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+
+    /* optional: clamp height so massive payload doesn't push the card tall */
+    max-height: 120px;
+}

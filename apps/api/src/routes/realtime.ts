@@ -4,6 +4,7 @@ import { eventBus } from "../realtime/eventBus.js";
 import { sseHandler } from "../realtime/sse.js";
 import { recordWebhookOnce } from "../realtime/webhookDb.js";
 import { rateLimit } from "../middleware/rateLimit.js";
+import { getSseStatus } from "../realtime/sse.js";
 
 export const realtimeRouter = Router();
 
@@ -24,6 +25,29 @@ const webhookLimiter = rateLimit({
 
 // SSE stream
 realtimeRouter.get("/sse", sseHandler);
+
+realtimeRouter.get("/sse/status", (req, res) => {
+    res.json({ ok: true, conns: getSseStatus() });
+});
+
+realtimeRouter.post("/sse/spam", async (req, res) => {
+    const kb = Math.max(1, Math.min(512, Number(req.query.kb ?? 64)));
+    const count = Math.max(1, Math.min(500, Number(req.query.count ?? 200)));
+    const paceMs = Math.max(0, Math.min(50, Number(req.query.paceMs ?? 2))); // <-- NEW
+
+    const payload = "x".repeat(kb * 1024);
+
+    for (let i = 0; i < count; i++) {
+        eventBus.publish("sse.spam", { i, kb, payload });
+
+        // yield so sockets can flush + 'drain' can fire
+        if (paceMs > 0) await new Promise(r => setTimeout(r, paceMs));
+        else await new Promise(r => setImmediate(r));
+    }
+
+    res.json({ ok: true, kb, count, paceMs });
+});
+
 
 realtimeRouter.get("/poll", pollLimiter, async (req, res) => {
     const afterSeqRaw = typeof req.query.afterSeq === "string" ? req.query.afterSeq : undefined;
